@@ -1,0 +1,68 @@
+name: OpenAdapt iOS IPA Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and Build iOS App
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Run Swift tests
+        run: swift test --package-path apps/ios
+
+      - name: List available Xcode schemes
+        run: |
+          xcodebuild -list \
+            -project apps/ios/OpenAdapt.xcodeproj
+
+      - name: Build for iPhone
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project apps/ios/OpenAdapt.xcodeproj \
+            -scheme OpenAdapt \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned app as IPA
+        run: |
+          set -euo pipefail
+
+          APP_PATH="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/OpenAdapt.app"
+
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: OpenAdapt.app was not found."
+            echo "Available build products:"
+            find "$RUNNER_TEMP/DerivedData/Build/Products" -maxdepth 4 -print || true
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/OpenAdapt.app"
+
+          cd "$RUNNER_TEMP/ipa"
+          /usr/bin/zip -r "$GITHUB_WORKSPACE/OpenAdapt-unsigned.ipa" Payload
+
+      - name: Upload IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenAdapt-unsigned-IPA
+          path: OpenAdapt-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
